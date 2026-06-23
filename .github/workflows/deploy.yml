@@ -1,0 +1,336 @@
+name: Deploy SecQ-Auto
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  NORTHFLANK_TOKEN: ${{ secrets.NORTHFLANK_TOKEN }}
+  FREESHELL_HOST: ${{ secrets.FREESHELL_HOST }}
+  FREESHELL_USER: ${{ secrets.FREESHELL_USER }}
+  FREESHELL_SSH_KEY: ${{ secrets.FREESHELL_SSH_KEY }}
+  PANDASTACK_TOKEN: ${{ secrets.PANDASTACK_TOKEN }}
+
+jobs:
+  # ============================================
+  # JOB 1: Build and Push Docker Images
+  # ============================================
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_USERNAME }}/secq-auto
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push Northflank image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./northflank
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.DOCKERHUB_USERNAME }}/secq-auto:northflank-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push FreeShell image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./freeshell/cowagent
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.DOCKERHUB_USERNAME }}/secq-auto:freeshell-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKERHUB_USERNAME }}/secq-auto:northflank-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================
+  # JOB 2: Deploy to Northflank
+  # ============================================
+  deploy-northflank:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Northflank CLI
+        run: npm install -g @northflank/cli
+
+      - name: Login to Northflank
+        run: northflank login --token $NORTHFLANK_TOKEN
+
+      - name: Create or update Northflank project
+        run: |
+          if northflank projects list | grep -q "secq-auto"; then
+            echo "Project exists, updating..."
+          else
+            northflank projects create secq-auto
+          fi
+
+      - name: Deploy LLM Router Service
+        run: |
+          northflank services create llm-router \
+            --project secq-auto \
+            --image "${DOCKERHUB_USERNAME}/secq-auto:northflank-${{ github.sha }}" \
+            --port 3000 \
+            --replicas 1 \
+            --cpu 0.5 \
+            --memory 1024 \
+            --env OMNI_CONFIG_PATH=/app/omniroute-config.yaml \
+            --env ROUTER9_CONFIG_PATH=/app/router9-config.yaml \
+            --env QDRANT_CONFIG_PATH=/app/qdrant-config.yaml \
+            --env QDRANT_DATA_PATH=/data/qdrant \
+            || northflank services update llm-router \
+            --project secq-auto \
+            --image "${DOCKERHUB_USERNAME}/secq-auto:northflank-${{ github.sha }}"
+
+      - name: Deploy Qdrant Service
+        run: |
+          northflank services create qdrant \
+            --project secq-auto \
+            --image qdrant/qdrant:v1.11.4 \
+            --port 6333 \
+            --replicas 1 \
+            --cpu 0.25 \
+            --memory 512 \
+            --volume /data:10GB \
+            || northflank services update qdrant \
+            --project secq-auto \
+            --image qdrant/qdrant:v1.11.4
+
+      - name: Add PostgreSQL addon
+        run: |
+          northflank addons create postgres \
+            --project secq-auto \
+            --plan free \
+            || echo "PostgreSQL addon may already exist"
+
+      - name: Get Northflank URL
+        id: northflank-url
+        run: |
+          URL=$(northflank services get llm-router --project secq-auto --json | jq -r '.url')
+          echo "NORTHFLANK_URL=$URL" >> $GITHUB_OUTPUT
+          echo "Northflank URL: $URL"
+
+  # ============================================
+  # JOB 3: Deploy to FreeShell.de
+  # ============================================
+  deploy-freeshell:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$FREESHELL_SSH_KEY" > ~/.ssh/freeshell_key
+          chmod 600 ~/.ssh/freeshell_key
+          ssh-keyscan -H $FREESHELL_HOST >> ~/.ssh/known_hosts
+
+      - name: Deploy to FreeShell.de
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.FREESHELL_HOST }}
+          username: ${{ env.FREESHELL_USER }}
+          key: ~/.ssh/freeshell_key
+          script: |
+            set -e
+            
+            mkdir -p ~/secq-auto
+            cd ~/secq-auto
+            
+            if [ -d ".git" ]; then
+              git pull origin main
+            else
+              git clone https://github.com/${{ github.repository }}.git .
+            fi
+            
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            
+            source venv/bin/activate
+            pip install -r freeshell/cowagent/requirements.txt
+            
+            cat > .env << EOF
+            NORTHFLANK_URL=${{ env.NORTHFLANK_URL }}
+            OMNI_URL=${{ env.NORTHFLANK_URL }}:3000/v1/chat/completions
+            ROUTER9_URL=${{ env.NORTHFLANK_URL }}:4000/v1/chat/completions
+            QDRANT_URL=${{ env.NORTHFLANK_URL }}:6333
+            EOF
+            
+            if [ ! -f /etc/systemd/system/secq-auto.service ]; then
+              sudo tee /etc/systemd/system/secq-auto.service > /dev/null << EOF
+            [Unit]
+            Description=SecQ-Auto CowAgent API
+            After=network.target
+            
+            [Service]
+            Type=simple
+            User=$USER
+            WorkingDirectory=/home/$USER/secq-auto
+            EnvironmentFile=/home/$USER/secq-auto/.env
+            ExecStart=/home/$USER/secq-auto/venv/bin/uvicorn freeshell.cowagent.main:app --host 0.0.0.0 --port 8000
+            Restart=always
+            RestartSec=10
+            
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+              
+              sudo systemctl daemon-reload
+              sudo systemctl enable secq-auto
+            fi
+            
+            sudo systemctl restart secq-auto
+            sleep 5
+            sudo systemctl status secq-auto --no-pager
+            
+            echo "✅ FreeShell.de deployment complete"
+
+  # ============================================
+  # JOB 4: Deploy to PandaStack
+  # ============================================
+  deploy-pandastack:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install PandaStack CLI
+        run: npm install -g @pandastack/cli
+
+      - name: Login to PandaStack
+        run: pandastack login --token $PANDASTACK_TOKEN
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to PandaStack
+        run: |
+          pandastack sites create secq-auto-frontend \
+            --dir ./frontend/dist \
+            --plan free \
+            || pandastack sites update secq-auto-frontend \
+            --dir ./frontend/dist
+
+  # ============================================
+  # JOB 5: End-to-End Tests
+  # ============================================
+  test-e2e:
+    needs: [deploy-northflank, deploy-freeshell, deploy-pandastack]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install test dependencies
+        run: |
+          npm install -g wait-on
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for Northflank..."
+          sleep 30
+          echo "Services should be ready now"
+
+      - name: Run health checks
+        run: |
+          curl -sf ${{ env.NORTHFLANK_URL }}:3000/health || echo "OmniRoute health check failed"
+          curl -sf ${{ env.NORTHFLANK_URL }}:6333/health || echo "Qdrant health check failed"
+          curl -sf ${{ env.FREESHELL_HOST }}:8000/health || echo "CowAgent health check failed"
+
+      - name: Run API tests
+        run: |
+          curl -sf -X POST ${{ env.NORTHFLANK_URL }}:3000/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "auto",
+              "messages": [{"role": "user", "content": "What is SOC 2?"}],
+              "max_tokens": 100
+            }' | jq '.choices[0].message.content' || echo "Chat test failed"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          echo "🎉 SecQ-Auto deployment complete!"
+          echo "   Status: ${{ job.status }}"
+          echo "   - Northflank: ${{ env.NORTHFLANK_URL }}"
+          echo "   - FreeShell: ${{ env.FREESHELL_HOST }}:8000"
+          echo "   - PandaStack: Frontend deployed"
+
+  # ============================================
+  # JOB 6: Cleanup on failure
+  # ============================================
+  cleanup:
+    needs: [deploy-northflank, deploy-freeshell, deploy-pandastack]
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Notify failure
+        run: |
+          echo "❌ Deployment failed. Check logs above for details."

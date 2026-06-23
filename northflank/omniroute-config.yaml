@@ -1,0 +1,50 @@
+# OmniRoute Configuration for SecQ-Auto
+# Routes to free LLM providers with auto-fallback
+
+server:
+  port: 3000
+  host: 0.0.0.0
+
+# Auto-combo routing strategy
+auto_combo:
+  # Primary: Use free providers
+  primary:
+    - provider: openrouter
+      model: "*"
+      priority: 1
+    - provider: kilo
+      model: "*"
+      priority: 2
+    - provider: qoder
+      model: "*"
+      priority: 3
+  
+  # Fallback: If all primary fail, use these
+  fallback:
+    - provider: openrouter
+      model: "openrouter/auto"
+      priority: 10
+
+# Token compression (saves 15-95% tokens)
+compression:
+  rtk:
+    enabled: true
+    level: aggressive
+  caveman:
+    enabled: true
+    level: 2
+
+# Rate limiting per provider
+rate_limit:
+  requests_per_minute: 60
+  tokens_per_minute: 100000
+
+# Logging
+logging:
+  level: info
+  format: json
+
+# Health check endpoint
+health:
+  enabled: true
+  path: /health

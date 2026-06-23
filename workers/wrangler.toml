@@ -1,0 +1,45 @@
+name = "secq-auto"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "npm run build"
+
+[env]
+# Set via wrangler secret put
+# OPENAI_API_KEY = ""
+# CLERK_SECRET_KEY = ""
+# STRIPE_SECRET_KEY = ""
+
+[vars]
+ENVIRONMENT = "development"
+LOG_LEVEL = "debug"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "secq-auto-db"
+database_id = ""
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "kb-chunks"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "secq-auto-files"
+
+[[queues]]
+binding = "PROCESSING_QUEUE"
+queue_name = "questionnaire-processing"
+
+[[queues]]
+binding = "INDEXING_QUEUE"
+queue_name = "kb-indexing"
+
+[[queues]]
+binding = "EXPORT_QUEUE"
+queue_name = "export-generation"
+
+[observability]
+enabled = true

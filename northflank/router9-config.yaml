@@ -1,0 +1,98 @@
+# ============================================
+# 9Router Configuration for SecQ-Auto
+# Fallback LLM router with free providers
+# ============================================
+
+server:
+  port: 4000
+  host: 0.0.0.0
+  timeout: 60000
+
+# Provider tiers - automatic fallback
+tiers:
+  # Tier 1: Free forever providers
+  free:
+    - name: kiro
+      api_key: free
+      models: ["*"]
+      priority: 1
+      base_url: https://ai.calculator.io/v1
+      rate_limit: 100
+      free: true
+    
+    - name: qwen
+      api_key: free
+      models: ["qwen-plus", "qwen-turbo"]
+      priority: 2
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      rate_limit: 60
+      free: true
+    
+    - name: iflow
+      api_key: free
+      models: ["*"]
+      priority: 3
+      base_url: https://ai.voicefox.com/v1
+      rate_limit: 50
+      free: true
+    
+    - name: opencode
+      api_key: free
+      models: ["*"]
+      priority: 4
+      base_url: https://api.opencode.org/v1
+      rate_limit: 40
+      free: true
+
+  # Tier 2: Cheap providers (requires API key)
+  cheap:
+    - name: glm
+      api_key: ${GLM_API_KEY:-}
+      models: ["glm-4-flash"]
+      priority: 10
+      base_url: https://open.bigmodel.cn/api/paas/v4
+      price_per_million: 0.60
+      free: false
+
+# Token compression
+compression:
+  rtk:
+    enabled: true
+    level: 2
+  caveman:
+    enabled: true
+    level: 1
+
+# Auto-fallback configuration
+fallback:
+  strategy: tier-based
+  retry_count: 3
+  retry_delay: 1000  # milliseconds
+  timeout: 5000
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout: 60000
+
+# Response caching
+cache:
+  enabled: true
+  ttl: 600  # 10 minutes
+  max_entries: 500
+
+# Logging
+logging:
+  level: info
+  format: json
+
+# Health check
+health:
+  enabled: true
+  path: /health
+
+# Metrics
+metrics:
+  enabled: true
+  path: /metrics
+  track_cost: true
+  track_tokens: true

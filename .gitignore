@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Build output
+.next/
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (*.key, *.pem)
+*.key
+*.pem
+*.p12
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker
+.docker/
+
+# Temp
+tmp/
+temp/
+.cache/

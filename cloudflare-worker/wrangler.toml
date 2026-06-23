@@ -1,0 +1,11 @@
+name = "secq-auto-edge"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Set via wrangler secret put COWAGENT_URL
+# Set via wrangler secret put API_KEY
+
+[observability]
+enabled = true

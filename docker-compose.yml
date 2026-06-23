@@ -1,0 +1,74 @@
+version: '3.9'
+
+# ============================================
+# SecQ-Auto Local Development
+# Run: docker compose up -d
+# ============================================
+
+services:
+  # OmniRoute — LLM Router (port 3000)
+  omniroute:
+    build:
+      context: ./northflank
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./northflank/omniroute-config.yaml:/app/omniroute-config.yaml
+      - qdrant_data:/data/qdrant
+    environment:
+      - OMNI_CONFIG_PATH=/app/omniroute-config.yaml
+      - ROUTER9_CONFIG_PATH=/app/router9-config.yaml
+      - QDRANT_CONFIG_PATH=/app/qdrant-config.yaml
+    restart: unless-stopped
+
+  # Qdrant — Vector Database (port 6333)
+  qdrant:
+    image: qdrant/qdrant:v1.11.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # CowAgent — FastAPI Backend (port 8000)
+  cowagent:
+    build:
+      context: ./freeshell/cowagent
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - NORTHFLANK_URL=http://omniroute:3000
+      - OMNI_URL=http://omniroute:3000/v1/chat/completions
+      - ROUTER9_URL=http://omniroute:4000/v1/chat/completions
+      - QDRANT_URL=http://qdrant:6333
+      - JWT_SECRET=local-dev-secret
+      - PORT=8000
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      omniroute:
+        condition: service_started
+    restart: unless-stopped
+
+  # Frontend — Next.js React App (port 3001)
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_KEY=sqa_default_key_change_me
+    depends_on:
+      - cowagent
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

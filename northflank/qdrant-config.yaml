@@ -1,0 +1,68 @@
+# ============================================
+# Qdrant Configuration for SecQ-Auto
+# Vector database for RAG knowledge base
+# ============================================
+
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+  max_request_size_mb: 32
+
+# Storage configuration
+storage:
+  storage_path: /data/qdrant
+  snapshots_path: /data/snapshots
+  
+  # Performance settings
+  performance:
+    max_search_threads: 4
+    max_optimization_threads: 2
+    max_indexing_threads: 4
+    max_io_threads: 0  # auto
+  
+  # On-disk vectors (for large datasets)
+  on_disk_payload: true
+  
+  # WAL settings
+  wal:
+    wal_capacity_mb: 256
+    wal_segments_ahead: 0
+
+# Clustering (for multi-node setup)
+cluster:
+  enabled: false  # Single node for free tier
+
+# Telemetry
+telemetry_disabled: true
+
+# CORS configuration
+cors:
+  enabled: true
+  allow_origin: "*"
+  allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allow_headers: ["*"]
+
+# TLS (disabled for internal use)
+tls:
+  enabled: false
+
+# Service limits
+limits:
+  max_collections: 100
+  max_shards_per_collection: 10
+  max_vectors_per_collection: 1000000
+  max_payload_size_bytes: 1073741824  # 1GB
+  max_optimization_threads: 2
+
+# Memory configuration
+memtable:
+  max_size: 5242880  # 5MB
+  flush_interval_sec: 5
+
+# Vector index
+hnsw:
+  m: 16
+  ef_construct: 100
+  full_scan_threshold: 10000
+  on_disk: true
