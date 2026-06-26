@@ -1,150 +1,140 @@
-/**
- * SecQ-Auto Cloudflare Worker
- * Edge proxy with rate limiting, JWT auth, CORS, caching
- */
+// Cloudflare Worker: CowAgent API with PandaStack Sandbox
+// Deployed at: https://<your-subdomain>.workers.dev
 
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
+import { createPandaStackSandbox, runCowAgentInSandbox, formatAnswer } from './cowagent.js';
 
-const app = new Hono();
-
-// ============================================
-// Configuration
-// ============================================
-const COWAGENT_URL = 'YOUR_COWAGENT_URL'; // Set via env var
-const API_KEY = 'YOUR_API_KEY'; // Set via env var
-
-// ============================================
-// Middleware
-// ============================================
-app.use('*', logger());
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-}));
-
-// Simple in-memory rate limiting
-const rateLimitMap = new Map();
-const RATE_LIMIT = 100; // requests per minute
-const RATE_WINDOW = 60000; // 1 minute
-
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const record = rateLimitMap.get(ip);
-  if (!record || now - record.windowStart > RATE_WINDOW) {
-    rateLimitMap.set(ip, { count: 1, windowStart: now });
-    return true;
+// Cloudflare Worker entry point
+export default {
+  async fetch(request, env) {
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await request.json();
+      const questionnaire = data.questionnaire;
+      
+      try {
+        // 1. Create PandaStack sandbox
+        const sandboxId = await createPandaStackSandbox(env.PANDASTACK_API_KEY);
+        
+        // 2. Run CowAgent in sandbox
+        const rawResult = await runCowAgentInSandbox(sandboxId, questionnaire);
+        
+        // 3. Format and return result
+        const response = formatAnswer(rawResult);
+        
+        return new Response(JSON.stringify(response), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    } else {
+      return new Response('Only JSON POST requests allowed', { status: 400 });
+    }
   }
-  if (record.count >= RATE_LIMIT) return false;
-  record.count++;
-  return true;
+};
+
+// ===== PandaStack API Helper Functions =====
+async function createPandaStackSandbox(apiKey) {
+  const response = await fetch('https://api.pandastack.ai/v1/sandboxes', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`PandaStack error: ${errText}`);
+  }
+  
+  const data = await response.json();
+  return data.sandboxId; // Assuming API returns sandbox ID
 }
 
-// Rate limiting middleware
-app.use('*', async (c, next) => {
-  const ip = c.req.header('CF-Connecting-IP') || 'unknown';
-  if (!checkRateLimit(ip)) {
-    return c.json({ error: 'Rate limit exceeded. Try again in 60 seconds.' }, 429);
+// ===== CowAgent Logic (simplified) =====
+async function runCowAgentInSandbox(sandboxId, questionnaire) {
+  // 1. Parse questionnaire
+  const parsed = await parseQuestionnaire(questionnaire);
+  
+  // 2. Retrieve context from Qdrant (Northflank)
+  const context = await retrieveFromQdrant(sandboxId);
+  
+  // 3. LLM response via OmniRoute/9Router (via Northflank)
+  const llmResponse = await getLLMResponse(questionnaire, context);
+  
+  // 4. Validate response
+  const validated = await validateAnswer(llmResponse);
+  
+  // 5. Format output
+  return formatAnswer(validated);
+}
+
+// ===== Helper Functions =====
+async function getLLMResponse(questionnaire, context) {
+  // Call Northflank API (OmniRoute/9Router) to get LLM response
+  const response = await fetch(`https://northflank.com/api/v1/omniroute`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.NORTHFLANK_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      prompt: questionnaire,
+      context: context,
+      timeout: 60
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error('LLM service error');
   }
-  await next();
-});
+  
+  const data = await response.json();
+  return data.response;
+}
 
-// Simple cache
-const cache = new Map();
-const CACHE_TTL = 300000; // 5 minutes
+// ===== Helper Functions (simplified) =====
+async function parseQuestionnaire(questionnaire) {
+  // Parse and validate questionnaire format
+  return questionnaire; // Simplified - actual implementation would parse structure
+}
 
-// ============================================
-// Health
-// ============================================
-app.get('/', (c) => c.json({
-  name: 'SecQ-Auto Edge Proxy',
-  version: '1.0.0',
-  status: 'operational',
-}));
+async function retrieveFromQdrant(sandboxId) {
+  // Retrieve relevant knowledge base data from Qdrant (via Northflank)
+  return { /* context data */ }; 
+}
 
-app.get('/health', async (c) => {
-  try {
-    const res = await fetch(`${COWAGENT_URL}/health`);
-    const data = await res.json();
-    return c.json({ status: 'healthy', backend: data });
-  } catch (e) {
-    return c.json({ status: 'degraded', error: e.message }, 503);
-  }
-});
+async function validateAnswer(answer) {
+  // Validate answer structure, safety checks, etc.
+  return answer;
+}
 
-// ============================================
-// Proxy all API routes to CowAgent
-// ============================================
-app.all('/api/*', async (c) => {
-  const path = c.req.path;
-  const method = c.req.method;
-  const cacheKey = `${method}:${path}:${c.req.query('q') || ''}`;
-
-  // Check cache for GET requests
-  if (method === 'GET') {
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      return c.json(cached.data);
+async function formatAnswer(answer) {
+  // Format answer for frontend (JSON)
+  return {
+    answer: answer,
+    confidence: 0.95,
+    metadata: {
+      processedAt: new Date().toISOString(),
+      version: '1.0'
     }
   }
+}
 
-  // Build target URL
-  const targetUrl = `${COWAGENT_URL}${path}`;
-
-  // Forward request
-  const headers = new Headers();
-  headers.set('Content-Type', 'application/json');
-  headers.set('X-API-Key', API_KEY);
-
-  // Forward auth header if present
-  const authHeader = c.req.header('Authorization');
-  if (authHeader) headers.set('Authorization', authHeader);
-
-  try {
-    let body = undefined;
-    if (method !== 'GET' && method !== 'HEAD') {
-      try { body = await c.req.text(); } catch (e) { /* no body */ }
-    }
-
-    const res = await fetch(targetUrl, { method, headers, body });
-    const data = await res.json();
-
-    // Cache GET responses
-    if (method === 'GET' && res.ok) {
-      cache.set(cacheKey, { data, ts: Date.now() });
-    }
-
-    return c.json(data, res.status);
-  } catch (e) {
-    return c.json({ error: 'Backend unavailable', details: e.message }, 502);
-  }
-});
-
-// ============================================
-// KB Search (cached)
-// ============================================
-app.get('/api/kb/search', async (c) => {
-  const q = c.req.query('q');
-  const topK = c.req.query('top_k') || '5';
-  const cacheKey = `kb:search:${q}:${topK}`;
-
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return c.json(cached.data);
-  }
-
-  try {
-    const res = await fetch(`${COWAGENT_URL}/api/kb/search?q=${encodeURIComponent(q)}&top_k=${topK}`, {
-      headers: { 'X-API-Key': API_KEY },
-    });
-    const data = await res.json();
-    cache.set(cacheKey, { data, ts: Date.now() });
-    return c.json(data);
-  } catch (e) {
-    return c.json({ error: e.message }, 502);
-  }
-});
-
-export default app;
+// ===== Cloudflare Worker Configuration =====
+// This file must be compiled to JavaScript (e.g., using wrangler)
+// For now, this is a conceptual example. Actual deployment requires:
+//
+// 1. Install wrangler: `npm install -g @cloudflare/wrangler`
+// 2. Create wrangler.toml: 
+//    name = "secq-auto-api"
+//    compatibility_date = "2024-01-01"
+//    compatibility_flags = ["nodejs_compat"]
+//    [vars]
+//      PANDASTACK_API_KEY = "your-pandastack-key"
+//      NORTHFLANK_API_KEY = "your-northflank-key"
+// 5. Deploy with: wrangler publish

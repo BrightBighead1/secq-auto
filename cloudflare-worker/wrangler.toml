@@ -1,11 +1,20 @@
-name = "secq-auto-edge"
-main = "worker.js"
+name = "secq-auto-api"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-# Set via wrangler secret put COWAGENT_URL
-# Set via wrangler secret put API_KEY
+[[variables]]
+key = "PANDASTACK_API_KEY"
+final_error = true
 
-[observability]
-enabled = true
+[[variables]]
+key = "NORTHFLANK_API_KEY"
+final_error = true
+
+# Optional: Add more environment variables
+[[secrets]]
+name = "PANDASTACK_API_KEY"
+id = "pandastack-secret"
+
+[[secrets]]
+name = "NORTHFLANK_API_KEY"
+id = "northflank-secret"
