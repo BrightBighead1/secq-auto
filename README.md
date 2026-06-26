@@ -1,42 +1,36 @@
 # 🛡️ SecQ-Auto — Autonomous Vendor Security Questionnaire Automation
 
-> **Turn 40 hours of manual work into 30 minutes of AI-powered automation.**
+> **Turn 40 hours of manual work into 30 minutes of AI‑powered automation.**
 
-SecQ-Auto is a 100% autonomous AI agent system that ingests vendor security questionnaires (Excel, CSV, PDF), retrieves answers from your company knowledge base using RAG, generates accurate responses with confidence scores, and exports completed questionnaires — all with human-in-the-loop review.
+SecQ-Auto is a 100 % autonomous AI‑agent system that ingests vendor security questionnaires (Excel, CSV, PDF), retrieves answers from your company knowledge base using RAG, generates accurate responses with confidence scores, and exports completed questionnaires — all with human‑in‑the‑loop review.
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        SecQ-Auto Stack                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────┐    HTTPS    ┌──────────────────────────────┐  │
-│  │  PandaStack   │ ────────→  │       FreeShell.de           │  │
-│  │  (Frontend)   │            │   CowAgent FastAPI (8000)    │  │
-│  │  Next.js 14   │            │                              │  │
-│  │  React 18     │            │  ┌────────────────────────┐  │  │
-│  └──────────────┘            │  │  5 AI Agents:          │  │  │
-│                               │  │  1. ParserAgent        │  │  │
-│                               │  │  2. RetrievalAgent     │  │  │
-│                               │  │  3. AnswerAgent        │  │  │
-│                               │  │  4. ValidatorAgent     │  │  │
-│                               │  │  5. FormatterAgent     │  │  │
-│                               │  └────────────────────────┘  │  │
-│                               └──────────┬───────────────────┘  │
-│                                          │ HTTPS                │
-│                               ┌──────────▼───────────────────┐  │
-│                               │       Northflank             │  │
-│                               │                              │  │
-│                               │  OmniRoute    (3000) ─── LLM│  │
-│                               │  9Router      (4000) ─── LLM│  │
-│                               │  Qdrant       (6333) ─── Vec│  │
-│                               └──────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Optional: Cloudflare Worker (Edge Proxy + Caching)      │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│                SecQ‑Auto Stack                 │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  ┌───────────────┐   HTTPS   ┌─────────────────┐ │
+│  │ Cloudflare    │ ───────► │ Cloudflare Worker│ │
+│  │ Pages (React) │           │ (Edge Proxy)   │ │
+│  └───────────────┘           └───────┬─────────┘ │
+│                                      │          │
+│                              ┌───────▼───────┐   │
+│                              │ PandaStack    │   │
+│                              │ (Hosting Front│   │
+│                              │ end React)    │   │
+│                              └───────┬───────┘   │
+│                                      │          │
+│                              ┌───────▼───────┐   │
+│                              │ Northflank   │   │
+│                              │ (Backend:    │   │
+│                              │  OmniRoute,  │   │
+│                              │  9Router,    │   │
+│                              │  Qdrant)     │   │
+│                              └──────────────┘   │
+│                                                 │
+└─────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -102,22 +96,22 @@ northflank projects create secq-auto
 # Deploy via GitHub Actions (see .github/workflows/deploy.yml)
 ```
 
-### 2. FreeShell.de (CowAgent FastAPI)
+### 2. Cloudflare Pages (React Frontend)
 ```bash
-# SSH into FreeShell.de
-ssh user@freemashell.de
-git clone https://github.com/YOUR_USERNAME/secq-auto.git
-cd secq-auto
-bash freeshell/setup.sh
-# Runs on port 8000, 24/7 via systemd
+# Install Cloudflare CLI if not present
+npm install -g @cloudflare/wrangler
+# Deploy the built React app to Cloudflare Pages
+pandastack login --token $PANDASTACK_TOKEN   # ensure PandaStack token for hosting the frontend
+cd frontend && npm run build
+# Use Wrangler to publish to Cloudflare Pages (replace with your Pages project name)
+wrangler pages publish ./dist --project-name secq-auto-frontend
 ```
 
-### 3. PandaStack (React Frontend)
+### 3. Cloudflare Worker (Optional Edge Proxy & Caching)
 ```bash
-npm install -g @pandastack/cli
-pandastack login --token $PANDASTACK_TOKEN
-cd frontend && npm run build
-pandastack sites create secq-auto-frontend --dir ./dist
+# Build and publish the Worker
+cd cloudflare-worker
+wrangler publish
 ```
 
 ## 🤖 AI Agent Pipeline
@@ -129,13 +123,13 @@ Upload → Parse → Retrieve → Answer → Validate → Review → Export
      Agent      Agent      Agent     Agent     Review    Agent
 ```
 
-1. **ParserAgent** — Extracts structured questions from Excel/CSV/PDF
-2. **RetrievalAgent** — Searches Qdrant vector DB for relevant context
-3. **AnswerAgent** — Generates answers using OmniRoute → 9Router fallback
-4. **ValidatorAgent** — Validates answers for accuracy and compliance
-5. **FormatterAgent** — Exports completed questionnaires
+1. **ParserAgent** – Extracts structured questions from Excel/CSV/PDF
+2. **RetrievalAgent** – Searches Qdrant vector DB for relevant context
+3. **AnswerAgent** – Generates answers using OmniRoute → 9Router fallback
+4. **ValidatorAgent** – Validates answers for accuracy and compliance
+5. **FormatterAgent** – Exports completed questionnaires
 
-## 🔐 Multi-Tenancy
+## 🔐 Multi‑Tenancy
 
 Every API request requires an `X-API-Key` header. Each tenant gets:
 - Isolated questionnaire storage
@@ -158,7 +152,8 @@ Import `grafana/secq-auto-dashboard.json` into Grafana for:
 | Service | Tier | Cost | 24/7 |
 |---------|------|------|------|
 | Northflank | Developer Sandbox | $0 | ✅ |
-| FreeShell.de | Free Shell | $0 | ✅ |
+| Cloudflare Pages | Free Plan | $0 | ✅ |
+| Cloudflare Worker | Free Plan | $0 | ✅ |
 | PandaStack | Free Container | $0 | ✅ |
 | **Total** | | **$0** | ✅ |
 
@@ -166,40 +161,34 @@ Import `grafana/secq-auto-dashboard.json` into Grafana for:
 
 ```
 secq-auto/
-├── .github/workflows/deploy.yml    # CI/CD pipeline
-├── northflank/                     # Northflank deployment
-│   ├── Dockerfile                  # OmniRoute + 9Router + Qdrant
-│   ├── entrypoint.sh               # Service startup script
-│   ├── omniroute-config.yaml       # LLM router config
-│   ├── router9-config.yaml         # Fallback router config
-│   └── qdrant-config.yaml          # Vector DB config
-├── freeshell/                      # FreeShell.de deployment
-│   ├── cowagent/
-│   │   ├── main.py                 # FastAPI app + 5 AI agents
-│   │   ├── requirements.txt        # Python dependencies
-│   │   └── Dockerfile
-│   └── setup.sh                    # Server setup script
-├── frontend/                       # Next.js React app
+├── .github/workflows/deploy.yml        # CI/CD pipeline
+├── northflank/                         # Northflank deployment
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   ├── omniroute-config.yaml
+│   ├── router9-config.yaml
+│   └── qdrant-config.yaml
+├── frontend/                           # Next.js React app
 │   ├── src/
-│   │   ├── pages/index.jsx         # Main dashboard
-│   │   ├── utils/api.js            # API client
-│   │   └── styles/globals.css      # Tailwind styles
+│   │   ├── pages/index.jsx
+│   │   ├── utils/api.js
+│   │   └── styles/globals.css
 │   ├── package.json
 │   └── tailwind.config.js
-├── cloudflare-worker/              # Optional edge proxy
+├── cloudflare-worker/                  # Optional edge proxy
 │   ├── worker.js
 │   └── wrangler.toml
 ├── grafana/
-│   └── secq-auto-dashboard.json    # Monitoring dashboard
-├── docker-compose.yml              # Local development
-├── SPEC.md                         # Full specification
+│   └── secq-auto-dashboard.json
+├── docker-compose.yml
+├── SPEC.md
 └── README.md
 ```
 
 ## 🎯 Roadmap
 
 - [x] Core AI agent pipeline (5 agents)
-- [x] Multi-tenant API with JWT auth
+- [x] Multi‑tenant API with JWT auth
 - [x] Excel/CSV/PDF parsing
 - [x] RAG with Qdrant vector search
 - [x] OmniRoute + 9Router LLM fallback
@@ -219,4 +208,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Built with ❤️ by the SecQ-Auto team. Automating security questionnaires so engineers can focus on building.**
+**Built with ❤️ by the SecQ‑Auto team. Automating security questionnaires so engineers can focus on building.**

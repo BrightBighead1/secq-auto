@@ -20,12 +20,12 @@ export async function createPandaStackSandbox(apiKey) {
 }
 
 // Run CowAgent logic in a PandaStack sandbox
-export async function runCowAgentInSandbox(sandboxId, questionnaire) {
+export async function runCowAgentInSandbox(sandboxId, questionnaire, apiKey) {
   // Send questionnaire to sandbox for processing
   const inputResponse = await fetch(`https://api.pandastack.ai/v1/sandboxes/${sandboxId}/input`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${PANDASTACK_API_KEY}`, // Note: This will be replaced with env var at runtime
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -52,7 +52,7 @@ export async function runCowAgentInSandbox(sandboxId, questionnaire) {
     const statusResponse = await fetch(`https://api.pandastack.ai/v1/sandboxes/${sandboxId}/output`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${PANDASTACK_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       }
     });
     
@@ -81,7 +81,7 @@ export async function runCowAgentInSandbox(sandboxId, questionnaire) {
   await fetch(`https://api.pandastack.ai/v1/sandboxes/${sandboxId}`, {
     method: 'DELETE',
     headers: {
-      'Authorization': `Bearer ${PANDASTACK_API_KEY}`
+      'Authorization': `Bearer ${apiKey}`
     }
   });
   
